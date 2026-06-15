@@ -52,13 +52,7 @@ void APJPlayerController::SetChatMessageString(const FString& InChatMessageStrin
 
 	if (IsLocalController() == true)
 	{
-		APJPlayerState* PJPS = GetPlayerState<APJPlayerState>();
-		if (IsValid(PJPS) == true)
-		{
-			FString CombinedMessageString = PJPS->GetPlayerInfoString() + TEXT(": ") + InChatMessageString;
-
-			ServerRPCPrintChatMessageString(CombinedMessageString);
-		}
+		ServerRPCPrintChatMessageString(InChatMessageString);
 	}
 }
 

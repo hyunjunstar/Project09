@@ -1,4 +1,4 @@
-// PJGameModeBase.cpp
+﻿// PJGameModeBase.cpp
 
 #include "Game/PJGameModeBase.h"
 
@@ -75,6 +75,13 @@ bool APJGameModeBase::IsGuessNumberString(const FString& InNumberString)
 				break;
 			}
 
+			// Add 하기 전에 Contains로 중복 숫자가 있는지 확인
+			if (UniqueDigits.Contains(C) == true)
+			{
+				bIsUnique = false;
+				break;
+			}
+
 			UniqueDigits.Add(C);
 		}
 
@@ -128,11 +135,24 @@ void APJGameModeBase::BeginPlay()
 
 void APJGameModeBase::PrintChatMessageString(APJPlayerController* InChattingPlayerController, const FString& InChatMessageString)
 {
-	FString ChatMessageString = InChatMessageString;
-	int Index = InChatMessageString.Len() - 3;
-	FString GuessNumberString = InChatMessageString.RightChop(Index);
+	FString GuessNumberString = InChatMessageString;
+
+	APJPlayerState* ChattingPlayerState = InChattingPlayerController->GetPlayerState<APJPlayerState>();
+
 	if (IsGuessNumberString(GuessNumberString) == true)
 	{
+		if (IsValid(ChattingPlayerState) == true)
+		{
+			if (ChattingPlayerState->CurrentGuessCount >= ChattingPlayerState->MaxGuessCount)
+			{
+				InChattingPlayerController->ClientRPCPrintChatMessageString(
+					TEXT("더 이상 시도할 수 없습니다.")
+				);
+
+				return;
+			}
+		}
+
 		FString JudgeResultString = JudgeResult(SecretNumberString, GuessNumberString);
 
 		IncreaseGuessCount(InChattingPlayerController);
@@ -142,7 +162,17 @@ void APJGameModeBase::PrintChatMessageString(APJPlayerController* InChattingPlay
 			APJPlayerController* PJPlayerController = *It;
 			if (IsValid(PJPlayerController) == true)
 			{
+
 				FString CombinedMessageString = InChatMessageString + TEXT(" -> ") + JudgeResultString;
+				if (IsValid(ChattingPlayerState) == true)
+				{
+					CombinedMessageString = ChattingPlayerState->GetPlayerInfoString()
+						+ TEXT(": ")
+						+ InChatMessageString
+						+ TEXT(" -> ")
+						+ JudgeResultString;
+				}
+
 				PJPlayerController->ClientRPCPrintChatMessageString(CombinedMessageString);
 
 				int32 StrikeCount = FCString::Atoi(*JudgeResultString.Left(1));
@@ -152,12 +182,44 @@ void APJGameModeBase::PrintChatMessageString(APJPlayerController* InChattingPlay
 	}
 	else
 	{
-		for (TActorIterator<APJPlayerController> It(GetWorld()); It; ++It)
+		bool bLooksLikeNumberInput = true;
+
+		for (TCHAR C : InChatMessageString)
 		{
-			APJPlayerController* PJPlayerController = *It;
-			if (IsValid(PJPlayerController) == true)
+			if (FChar::IsDigit(C) == false)
 			{
-				PJPlayerController->ClientRPCPrintChatMessageString(InChatMessageString);
+				bLooksLikeNumberInput = false;
+				break;
+			}
+		}
+		if (bLooksLikeNumberInput == true)
+		{
+			if (IsValid(InChattingPlayerController) == true)
+			{
+				InChattingPlayerController->ClientRPCPrintChatMessageString(
+					TEXT("중복되지 않는 1~9 사이의 3자리 숫자를 입력해주세요.")
+				);
+			}
+		}
+		else
+		{
+			for (TActorIterator<APJPlayerController> It(GetWorld()); It; ++It)
+			{
+				APJPlayerController* PJPlayerController = *It;
+
+				if (IsValid(PJPlayerController) == true)
+				{
+					FString CombinedMessageString = InChatMessageString;
+
+					if (IsValid(ChattingPlayerState) == true)
+					{
+						CombinedMessageString = ChattingPlayerState->GetPlayerInfoString()
+							+ TEXT(": ")
+							+ InChatMessageString;
+					}
+
+					PJPlayerController->ClientRPCPrintChatMessageString(CombinedMessageString);
+				}
 			}
 		}
 	}
@@ -176,6 +238,8 @@ void APJGameModeBase::ResetGame()
 {
 	SecretNumberString = GenerateSecretNumber();
 
+	UE_LOG(LogTemp, Error, TEXT("%s"), *SecretNumberString);
+
 	for (const auto& PJPlayerController : AllPlayerControllers)
 	{
 		APJPlayerState* PJPS = PJPlayerController->GetPlayerState<APJPlayerState>();
@@ -191,15 +255,20 @@ void APJGameModeBase::JudgeGame(APJPlayerController* InChattingPlayerController,
 	if (3 == InStrikeCount)
 	{
 		APJPlayerState* PJPS = InChattingPlayerController->GetPlayerState<APJPlayerState>();
-		for (const auto& PJPlayerController : AllPlayerControllers)
-		{
-			if (IsValid(PJPS) == true)
-			{
-				FString CombinedMessageString = PJPS->PlayerNameString + TEXT(" has won the game.");
-				PJPlayerController->NotificationText = FText::FromString(CombinedMessageString);
 
-				ResetGame();
+		if (IsValid(PJPS) == true)
+		{
+			FString CombinedMessageString = PJPS->PlayerNameString + TEXT(" 가 승리 하였습니다.");
+
+			for (const auto& PJPlayerController : AllPlayerControllers)
+			{
+				if (PJPlayerController.IsValid() == true)
+				{
+					PJPlayerController->NotificationText = FText::FromString(CombinedMessageString);
+				}
 			}
+
+			ResetGame();
 		}
 	}
 	else
@@ -222,11 +291,13 @@ void APJGameModeBase::JudgeGame(APJPlayerController* InChattingPlayerController,
 		{
 			for (const auto& PJPlayerController : AllPlayerControllers)
 			{
-				PJPlayerController->NotificationText = FText::FromString(TEXT("Draw..."));
-
-				ResetGame();
+				if (PJPlayerController.IsValid() == true)
+				{
+					PJPlayerController->NotificationText = FText::FromString(TEXT("무승부 입니다."));
+				}
 			}
+
+			ResetGame();
 		}
 	}
 }
-
